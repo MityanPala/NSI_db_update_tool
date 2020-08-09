@@ -1,3 +1,1 @@
-*testing_exclusion.txt
-exclude_dir_but_save_txt_file/*
-!exclude_dir_but_save_txt_file/save_this.txt
+/NSI_db_update_tool/all_data/*
