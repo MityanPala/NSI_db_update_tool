@@ -28,7 +28,7 @@ int main()
 	CURLcode res;
 	curl_global_init(CURL_GLOBAL_DEFAULT); // this needs to be initialized once- will allow code below to use libcurl
 	/*****************************************************************/
-	string urlBase = "https://nsi.rosminzdrav.ru/port/rest/searchDictionary?userKey=";
+	string urlBase = "http://nsi.rosminzdrav.ru/port/rest/searchDictionary?userKey=";
 	string urlString = "";
 	string tokenString = "";
 	string pages[] = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15" }; // костыль, убрать
@@ -55,6 +55,12 @@ int main()
 	{
 		curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L); // SKIP_PEER_VERIFICATION
 		curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L); // SKIP_HOSTNAME_VERIFICATION
+		curl_easy_setopt(curl, CURLOPT_HTTPPROXYTUNNEL, 1L);
+		curl_easy_setopt(curl, CURLOPT_PROXY, "10.14.10.147:8080");
+		//curl_easy_setopt(curl, CURLOPT_PROXYTYPE, CURLPROXY_HTTP); //traffic inspector http ftp 2.0.1.721 
+		curl_easy_setopt(curl, CURLOPT_PROXYAUTH, CURLAUTH_ANY);
+		//curl_easy_setopt(curl, CURLOPT_PROXYUSERPWD, "dima:123");
+
 		/*****************************************************************/
 		bool firstResponse = true; // в первом полученном от сервера сообщении найдем количество строк в списке справочников - около 1200 на июль 2020
 		// сделать полностью в цикле
@@ -64,7 +70,16 @@ int main()
 		curl_easy_setopt(curl, CURLOPT_URL, urlString.c_str()); // не работает со string, надо преобразовывать в const
 		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
 		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &content);
+
 		res = curl_easy_perform(curl); // выполнение запроса
+
+		cout << "---" << res << "---" << endl;
+		
+		if ("" == content) // при несрабатывании типа аутентификации в прокси
+		{
+			cout << endl << content << " is empty..." << endl;
+		}
+		system("pause");
 
 		fstream F;
 		fileName = "all_data\\updated_data\\" + pageNumber + "_page.txt";
