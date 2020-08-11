@@ -57,9 +57,12 @@ int main()
 		curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L); // SKIP_HOSTNAME_VERIFICATION
 		curl_easy_setopt(curl, CURLOPT_HTTPPROXYTUNNEL, 1L);
 		curl_easy_setopt(curl, CURLOPT_PROXY, "10.14.10.147:8080");
-		//curl_easy_setopt(curl, CURLOPT_PROXYTYPE, CURLPROXY_HTTP); //traffic inspector http ftp 2.0.1.721 
-		curl_easy_setopt(curl, CURLOPT_PROXYAUTH, CURLAUTH_ANY);
-		//curl_easy_setopt(curl, CURLOPT_PROXYUSERPWD, "dima:123");
+		curl_easy_setopt(curl, CURLOPT_PROXYTYPE, CURLPROXY_HTTP); //traffic inspector http ftp 2.0.1.721 
+		curl_easy_setopt(curl, CURLOPT_PROXYAUTH, CURLAUTH_BASIC);
+		curl_easy_setopt(curl, CURLOPT_PROXYUSERNAME, "dima");
+		curl_easy_setopt(curl, CURLOPT_PROXYPASSWORD, "123");
+		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 20L);
+		curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
 
 		/*****************************************************************/
 		bool firstResponse = true; // в первом полученном от сервера сообщении найдем количество строк в списке справочников - около 1200 на июль 2020
