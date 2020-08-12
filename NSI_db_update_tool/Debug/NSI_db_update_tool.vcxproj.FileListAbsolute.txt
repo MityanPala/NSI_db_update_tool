@@ -1,2 +1,4 @@
 C:\Users\user\Desktop\Git Repositories\NSI_db_update_tool\NSI_db_update_tool\Debug\NSI_db_update_tool.exe
 C:\Users\user\Desktop\Git Repositories\NSI_db_update_tool\NSI_db_update_tool\Debug\NSI_db_update_tool.pdb
+C:\Git Repositories\NSI_db_update_tool\NSI_db_update_tool\Debug\NSI_db_update_tool.exe
+C:\Git Repositories\NSI_db_update_tool\NSI_db_update_tool\Debug\NSI_db_update_tool.pdb

@@ -21,54 +21,97 @@ static size_t write_head(char* ptr, size_t size, size_t nmemb, std::ostream* str
 	return size * nmemb;
 }
 
-int main()
+CURLcode basicRequest(string urlF, CURL* curlHandle, string* contentString);
+
+int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - если дошли до самого конца - там получим 0
 {
 	/*****************************************************************/
 	CURL* curl;
 	CURLcode res;
-	curl_global_init(CURL_GLOBAL_DEFAULT); // this needs to be initialized once- will allow code below to use libcurl
+	curl_global_init(CURL_GLOBAL_DEFAULT); // this needs to be initialized once - will allow code below to use libcurl
 	/*****************************************************************/
+	//cout << system("mkdir all_data"); // 1 если уже существует
+	system("mkdir all_data");
+	system("mkdir all_data\\configuration_and_logs");
+	system("mkdir all_data\\configuration_and_logs\\logs");
+	system("mkdir all_data\\updated_data");
+	system("mkdir all_data\\updated_data\\documents_lists");
+	system("mkdir all_data\\updated_data\\documents");
+	system("cls");
+	//ShowWindow(GetConsoleWindow(), SW_HIDE); top!
+
+	string separator = "//--------------------------------------------------------------------------";
+	string logsName = "all_data\\configuration_and_logs\\logs\\overall_app_logs.txt";
+	time_t seconds = time(NULL);
+
+	fstream writeLogs;
+	writeLogs.open(logsName, ios::app);
+	if (!writeLogs)
+	{
+		logsName = "all_data\\configuration_and_logs\\logs\\";
+		logsName += asctime(localtime(&seconds)); // local time
+		logsName += "_app_logs.txt";
+		writeLogs.open(logsName, ios::out);
+		if (!writeLogs)
+		{
+			return 100;
+		}
+	}
+	writeLogs << endl << separator << endl << "|start of process: " << asctime_s(localtime(&seconds)) << "|" << endl;
+
 	string urlBase = "http://nsi.rosminzdrav.ru/port/rest/searchDictionary?userKey=";
-	string urlString = "";
-	string tokenString = "";
+	
 	string pages[] = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15" }; // костыль, убрать
 	string pageNumber = pages[1];
+
+	string tokenString = "";
 	string fileName = "";
 
-	/***EXTRACT USER TOKEN FROM FILE***/
-	fstream extractToken;
+	/***EXTRACT USAGE INFO FROM FILE***/
+	fstream extractToken, extractProxyInfo;
 	extractToken.open("all_data\\configuration_and_logs\\user_token.txt", ios::in);
 	if (!extractToken)
 	{
-		cout << " Cannot open token file...";
-		Sleep(10000);
-		cout << endl << endl;
-		system("pause");
-		return 0;
+
+		return 1;
 	}
 	getline(extractToken, tokenString);
 	extractToken.close();
-	/***EXTRACT USER TOKEN FROM FILE***/
-	string kok;
+	/***EXTRACT USAGE INFO FROM FILE***/
+
 	curl = curl_easy_init();
 	if (curl)
 	{
+		string content = "";
+		string urlString = "";
+
 		curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L); // SKIP_PEER_VERIFICATION
 		curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L); // SKIP_HOSTNAME_VERIFICATION
-		curl_easy_setopt(curl, CURLOPT_HTTPPROXYTUNNEL, 1L);
+		
+		urlString = urlBase + tokenString + "&page=" + pageNumber + "&size=200"; // размер выдачи больше 400 иногда не работает и сервер не хочет его обрабатывать
+
+		//попробовать сделать запрос без прокси - если проходит - все ок, не проходит -> задаем параметры прокси(которые слетят только после cleanup'а)
+		res = basicRequest(urlString, curl, &content);
+		if (res != CURLE_OK)
+		{
+
+		}
+		cout << endl << "|" << res << endl;
+		system("pause");
+		return 0;
+
+		/*curl_easy_setopt(curl, CURLOPT_HTTPPROXYTUNNEL, 1L);
+		curl_easy_setopt(curl, CURLOPT_PROXYAUTH, CURLAUTH_BASIC);
 		curl_easy_setopt(curl, CURLOPT_PROXY, "10.14.10.147:8080");
 		curl_easy_setopt(curl, CURLOPT_PROXYTYPE, CURLPROXY_HTTP); //traffic inspector http ftp 2.0.1.721 
-		curl_easy_setopt(curl, CURLOPT_PROXYAUTH, CURLAUTH_BASIC);
+		
 		curl_easy_setopt(curl, CURLOPT_PROXYUSERNAME, "dima");
 		curl_easy_setopt(curl, CURLOPT_PROXYPASSWORD, "123");
-		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 20L);
-		curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
+		curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);*/
 
 		/*****************************************************************/
-		bool firstResponse = true; // в первом полученном от сервера сообщении найдем количество строк в списке справочников - около 1200 на июль 2020
-		// сделать полностью в цикле
-		string content;
-		urlString = urlBase + tokenString + "&page=" + pageNumber + "&size=200"; // размер выдачи больше 400 иногда не работает и сервер не хочет его обрабатывать
+		
 
 		curl_easy_setopt(curl, CURLOPT_URL, urlString.c_str()); // не работает со string, надо преобразовывать в const
 		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
@@ -88,8 +131,6 @@ int main()
 		fileName = "all_data\\updated_data\\" + pageNumber + "_page.txt";
 		F.open(fileName.c_str(), ios::out);
 		F << content;
-		kok = content.c_str();
-		//cout << "1-------------------------------------\n" << content.c_str() << "1-------------------------------------" << endl;
 		F.close();
 		if (res != CURLE_OK)
 		{
@@ -149,7 +190,20 @@ int main()
 		return 0;
 	}
 
-	system("pause");
 	curl_global_cleanup(); // when program doesn't use libcurl anymore in the following code
+	writeLogs << "|end of process: " << asctime(localtime(&seconds)) << "|" << endl << separator << endl;
+	writeLogs.close();
 	return 0;
+}
+
+CURLcode basicRequest(string urlF, CURL* curlHandle, string* contentString)
+{
+	CURLcode resF;
+
+	curl_easy_setopt(curlHandle, CURLOPT_URL, urlF.c_str());
+	curl_easy_setopt(curlHandle, CURLOPT_WRITEFUNCTION, write_data);
+	curl_easy_setopt(curlHandle, CURLOPT_WRITEDATA, contentString);
+	resF = curl_easy_perform(curlHandle);
+
+	return resF;
 }
