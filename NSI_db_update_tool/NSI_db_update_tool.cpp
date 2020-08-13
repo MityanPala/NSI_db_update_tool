@@ -22,42 +22,64 @@ static size_t write_head(char* ptr, size_t size, size_t nmemb, std::ostream* str
 }
 
 CURLcode basicRequest(string urlF, CURL* curlHandle, string* contentString);
+string replaceBadCharacters(string strToFix, char charToReplace, char charToReplaceWith);
 
 int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - если дошли до самого конца - там получим 0
 {
-	/*****************************************************************/
 	CURL* curl;
 	CURLcode res;
 	curl_global_init(CURL_GLOBAL_DEFAULT); // this needs to be initialized once - will allow code below to use libcurl
-	/*****************************************************************/
-	//cout << system("mkdir all_data"); // 1 если уже существует
-	system("mkdir all_data");
-	system("mkdir all_data\\configuration_and_logs");
-	system("mkdir all_data\\configuration_and_logs\\logs");
-	system("mkdir all_data\\updated_data");
-	system("mkdir all_data\\updated_data\\documents_lists");
-	system("mkdir all_data\\updated_data\\documents");
-	system("cls");
-	//ShowWindow(GetConsoleWindow(), SW_HIDE); top!
+
+	//ShowWindow(GetConsoleWindow(), SW_HIDE);
+	system("mkdir all_data\n");
+	system("mkdir all_data\\configuration_and_logs\n");
+	system("mkdir all_data\\configuration_and_logs\\logs\n");
+	system("mkdir all_data\\updated_data\n");
+	system("mkdir all_data\\updated_data\\documents_lists\n");
+	system("mkdir all_data\\updated_data\\documents\n");
 
 	string separator = "//--------------------------------------------------------------------------";
 	string logsName = "all_data\\configuration_and_logs\\logs\\overall_app_logs.txt";
-	time_t seconds = time(NULL);
+	string currentDate = "cannot_recieve_date";
+
+	struct tm newtime;
+	__time32_t aclock;
+	char buffer[32];
+	errno_t errNum;
+	_time32(&aclock);
+	_localtime32_s(&newtime, &aclock);
+	errNum = asctime_s(buffer, 32, &newtime);
+	if (!errNum)
+	{
+		currentDate = buffer;
+		int enterPos = currentDate.find('\n');
+		int enterLen = currentDate.length();
+		if (enterPos >= 0 && enterPos < enterLen)
+		{
+			currentDate.erase(enterPos, enterLen);
+		}
+		else
+		{
+			currentDate = "cannot_recieve_date";
+		}
+	}
 
 	fstream writeLogs;
-	writeLogs.open(logsName, ios::app);
+	writeLogs.open(logsName.c_str(), ios::app);
 	if (!writeLogs)
 	{
 		logsName = "all_data\\configuration_and_logs\\logs\\";
-		logsName += asctime(localtime(&seconds)); // local time
+		currentDate = replaceBadCharacters(currentDate, ':', '-');
+		currentDate = replaceBadCharacters(currentDate, ' ', '_');
+		logsName += currentDate; // local time
 		logsName += "_app_logs.txt";
-		writeLogs.open(logsName, ios::out);
+		writeLogs.open(logsName.c_str(), ios::out); // чтобы проверить, существует файл или нет - надо сначала ios::in, потом открыть его на запись - но надо ли?
 		if (!writeLogs)
 		{
-			return 100;
+			return 100; // если не можем создать файл, то либо не хватает прав, либо такой файл уже существует
 		}
 	}
-	writeLogs << endl << separator << endl << "|start of process: " << asctime_s(localtime(&seconds)) << "|" << endl;
+	writeLogs << endl << separator << endl << "|start of process: " << currentDate << "|" << endl;
 
 	string urlBase = "http://nsi.rosminzdrav.ru/port/rest/searchDictionary?userKey=";
 	
@@ -65,6 +87,8 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 	string pageNumber = pages[1];
 
 	string tokenString = "";
+	string proxyString = "";
+	string proxyUsrPwd = "";
 	string fileName = "";
 
 	/***EXTRACT USAGE INFO FROM FILE***/
@@ -72,11 +96,30 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 	extractToken.open("all_data\\configuration_and_logs\\user_token.txt", ios::in);
 	if (!extractToken)
 	{
-
-		return 1;
+		writeLogs << "Cannot extract user token from \"all_data\\configuration_and_logs\\user_token.txt\"" << endl;
+		writeLogs.close();
+		return 101;
 	}
 	getline(extractToken, tokenString);
 	extractToken.close();
+
+	extractProxyInfo.open("all_data\\configuration_and_logs\\proxy_info.txt", ios::in);
+	if (!extractProxyInfo)
+	{
+		writeLogs << "Cannot extract proxy info from \"all_data\\configuration_and_logs\\proxy_info.txt\"" << endl;
+		writeLogs.close();
+		return 102;
+	}
+	getline(extractProxyInfo, proxyString);
+	getline(extractProxyInfo, proxyUsrPwd);
+	extractProxyInfo.close();
+	if (proxyString == "" || proxyUsrPwd == "")
+	{
+		writeLogs << "Cannot properly extract proxy or password from \"all_data\\configuration_and_logs\\proxy_info.txt\"" << endl;
+		writeLogs << "Please, check file structure(1st line: proxy url - \"http://xxx.xxx.xxx.xxx:xxxx\"; 2nd line - \"usr:pwd\")" << endl;
+		writeLogs.close();
+		return 103;
+	}
 	/***EXTRACT USAGE INFO FROM FILE***/
 
 	curl = curl_easy_init();
@@ -90,14 +133,21 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 		
 		urlString = urlBase + tokenString + "&page=" + pageNumber + "&size=200"; // размер выдачи больше 400 иногда не работает и сервер не хочет его обрабатывать
 
-		//попробовать сделать запрос без прокси - если проходит - все ок, не проходит -> задаем параметры прокси(которые слетят только после cleanup'а)
+		curl_easy_setopt(curl, CURLOPT_HTTPPROXYTUNNEL, 1L);
+		curl_easy_setopt(curl, CURLOPT_PROXYAUTH, CURLAUTH_BASIC);
+		curl_easy_setopt(curl, CURLOPT_PROXY, proxyString.c_str());
+		curl_easy_setopt(curl, CURLOPT_PROXYUSERPWD, proxyUsrPwd.c_str());
+		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
+		curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+
 		res = basicRequest(urlString, curl, &content);
 		if (res != CURLE_OK)
 		{
 
 		}
+
 		cout << endl << "|" << res << endl;
-		system("pause");
+		//system("pause");
 		return 0;
 
 		/*curl_easy_setopt(curl, CURLOPT_HTTPPROXYTUNNEL, 1L);
@@ -191,7 +241,7 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 	}
 
 	curl_global_cleanup(); // when program doesn't use libcurl anymore in the following code
-	writeLogs << "|end of process: " << asctime(localtime(&seconds)) << "|" << endl << separator << endl;
+	writeLogs << "|end of process: " << currentDate << "|" << endl << separator << endl;
 	writeLogs.close();
 	return 0;
 }
@@ -206,4 +256,21 @@ CURLcode basicRequest(string urlF, CURL* curlHandle, string* contentString)
 	resF = curl_easy_perform(curlHandle);
 
 	return resF;
+}
+
+string replaceBadCharacters(string strToFix, const char charToReplace, const char charToReplaceWith)
+{
+	for (int i = 0; i < strToFix.length(); i++)
+	{
+		if (strToFix[i] != charToReplace)
+		{
+			continue;
+		}
+		else
+		{
+			strToFix[i] = charToReplaceWith;
+		}
+	}
+
+	return strToFix;
 }
