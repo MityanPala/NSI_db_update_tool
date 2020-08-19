@@ -31,9 +31,12 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 {
 	CURL* curl;
 	CURLcode res;
-	int counter = 0; // number of successfully updated data files
+
 	int counterOfAllDocs = 0;
-	int versionMismatchCounter = 0;
+
+	int modifiedFiles = 0; // число всех измененных
+	int suc_modifiedFiles = 0; // число успешно измененных
+
 	curl_global_init(CURL_GLOBAL_DEFAULT); // this needs to be initialized once - will allow code below to use libcurl
 
 	//ShowWindow(GetConsoleWindow(), SW_HIDE); // пока не отладил программу до конца - можно выводить прогресс загрузки файлов с помощью cout
@@ -268,6 +271,8 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 			return 204;
 		}
 
+		system("cls");
+
 		string urlBasePass = "http://nsi.rosminzdrav.ru/port/rest/passport?userKey=" + tokenString + "&identifier=";
 		string urlBaseData = "http://nsi.rosminzdrav.ru/port/rest/data?userKey=" + tokenString + "&identifier=";
 		string urlPassString = "";
@@ -278,8 +283,8 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 		fstream docData;
 		string savingBuffer;
 		int dirFlag = 0;
-		pageNumber = "1";
 		string getVersion = "";
+		int counterOfUpToDate = 0;
 
 		// начнем получать информацию о самих справочниках...
 		while (oidsList.size() > 0)
@@ -314,6 +319,8 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 					docData.close();
 					if (getVersion == topVer)
 					{
+						counterOfUpToDate++;
+						std::cout << counterOfUpToDate << " out of " << counterOfAllDocs << " is up to date" << endl;
 						continue;
 					}
 					else
@@ -328,8 +335,9 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 					}
 				}
 			}
-			
-			//sssssssssssssssssssssssssssss
+
+			modifiedFiles++; // если у нас не совпадают версии или ее нет - значит, мы затрагиваем директорию и следовательно будем проводить изменения ниже
+
 			urlPassString = urlBasePass + topOID; // pass url
 			res = basicRequest(urlPassString, curl, &content);
 
@@ -366,9 +374,76 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 			docData.close();
 			// сохранили структуру
 
-			// как сделать загрузку данных?
+			//-----------------------------------------------------------------------------------------------
+			// загрузка данных справочника
+			/*STARTED TRYING TO RECIEVE TOTAL NUMBER OF DICTIONARIES*/
+			//stack <string> dataRowCount;
+			int numPosN = content.find("\"rowsCount\":"); // "total": "rowsCount":
+			int numLenN = content.length();
 
-			counter++;
+			if (!(numPosN >= 0 && numPosN < numLenN))
+			{
+				writeLogs << "Something went wrong while trying to get total number of rows: " << topOID << endl;
+				continue;
+			}
+
+			int separatorIndexN = numPosN + 12; // длина подстроки "total":
+			while ((separatorIndexN < numLenN) && (content[separatorIndexN] != ','))
+			{
+				separatorIndexN++;
+			}
+
+			int convertedStringToIntN = atoi(content.substr(numPosN + 12, separatorIndexN - (numPosN + 12)).c_str());
+			if (!convertedStringToIntN)
+			{
+				writeLogs << "Something went wrong while trying to perform conversion of total number of rows to int: " << topOID << endl;
+				continue;
+			}
+
+			int maxPagesN = convertedStringToIntN / 200;
+			if ((((double)convertedStringToIntN) / 200.0) > ((double)maxPagesN))
+			{
+				maxPagesN++; // если к примеру в выдаче 1201 справочник, то мы получим 6 maxPages, но если разделить не нацело, то мы увидим, что надо прибавить 1 к кол-ву страниц
+			}
+			/*STOPPED TRYING TO RECIEVE TOTAL NUMBER OF DICTIONARIES*/
+
+			char pageNumberToStrN[100];
+
+			for (unsigned int j = 1; j <= maxPagesN; j++)
+			{
+				if (_itoa_s(j, pageNumberToStrN, _countof(pageNumberToStrN), 10))
+				{
+					writeLogs << "Something went wrong during the page number conversion. Page number: \"" << j << "\" " << topOID << endl;
+					continue;
+				}
+				pageNumber = pageNumberToStrN;
+
+				urlDataString = urlBaseData + topOID + "&page=" + pageNumber + "&size=200";
+				content = "";
+				res = basicRequest(urlDataString, curl, &content);
+
+				if (res != CURLE_OK)
+				{
+					writeLogs << "Something went wrong during the dictionary data request. Page number: \"" << j << "\" " << topOID << endl;
+					continue;
+				}
+
+				fileName = "all_data\\updated_data\\documents\\" + topOID + "\\data\\" + topOID + "_page_" + pageNumber + ".txt";
+
+				docData.open(fileName.c_str(), ios::out);
+				if (!docData)
+				{
+					writeLogs << "Something went wrong while trying to save " << j << " list into file. Wanted destination: " << topOID << endl;
+					continue;
+				}
+				docData << content;
+				docData.close();
+			}
+			// загрузка данных справочника
+			//-----------------------------------------------------------------------------------------------
+			 
+			suc_modifiedFiles++; // если успешно заново загрузили все данные - доходим до этой строки и увеличиваем счетчик
+			cout << suc_modifiedFiles << " files has been modified by that moment" << endl;
 		}
 		// конец получения информации о справочниках
 
@@ -403,7 +478,8 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 	}
 	// конец расчета времени
 
-	writeLogs << "Program has updated database. \nNumber of successful updates: " << counter << " out of " << counterOfAllDocs << endl;
+	writeLogs << "Program has updated database. \nNumber of modified dictionaries: " << modifiedFiles << " out of " << counterOfAllDocs << endl;
+	writeLogs << "Successfully modified dictionaries: " << suc_modifiedFiles << " out of all modified dictionaries: " << modifiedFiles << endl;
 	writeLogs << "|  end of the process: " << currentDate << "|" << endl << separator << endl << endl;
 	writeLogs.close();
 	
