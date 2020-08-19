@@ -25,11 +25,15 @@ static size_t write_head(char* ptr, size_t size, size_t nmemb, std::ostream* str
 
 CURLcode basicRequest(string urlF, CURL* curlHandle, string* contentString);
 string replaceBadCharacters(string strToFix, char charToReplace, char charToReplaceWith);
+void extractTags(string contentString, string tagToFind, char separatorBetweenTags, stack <string>* stackOfStrings);
 
 int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - если дошли до самого конца - там получим 0
 {
 	CURL* curl;
 	CURLcode res;
+	int counter = 0; // number of successfully updated data files
+	int counterOfAllDocs = 0;
+	int versionMismatchCounter = 0;
 	curl_global_init(CURL_GLOBAL_DEFAULT); // this needs to be initialized once - will allow code below to use libcurl
 
 	//ShowWindow(GetConsoleWindow(), SW_HIDE); // пока не отладил программу до конца - можно выводить прогресс загрузки файлов с помощью cout
@@ -81,12 +85,11 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 			return 100; // если не можем создать файл, то либо не хватает прав, либо такой файл уже существует
 		}
 	}
-	writeLogs << endl << separator << endl << "|start of process: " << currentDate << "|" << endl;
+	writeLogs << separator << endl << "|start of the process: " << currentDate << "|" << endl;
 
 	string urlBase = "http://nsi.rosminzdrav.ru/port/rest/searchDictionary?userKey=";
 	
-	string pages[] = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15" }; // костыль, убрать
-	string pageNumber = pages[1];
+	string pageNumber = "1";
 
 	string tokenString = "";
 	string proxyString = "";
@@ -115,7 +118,7 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 	getline(extractProxyInfo, proxyString);
 	getline(extractProxyInfo, proxyUsrPwd);
 	extractProxyInfo.close();
-	if (proxyString == "" || proxyUsrPwd == "") // нам вообще может быть не нужен прокси - тогда надо будет сделать этот return ниже, на этапе, когда не получится сделать запрос без прокси
+	if ((proxyString == "" || proxyUsrPwd == "") && proxyString != "noproxy") // нам вообще может быть не нужен прокси
 	{
 		writeLogs << "Cannot properly extract proxy or password from \"all_data\\configuration_and_logs\\proxy_info.txt\"" << endl;
 		writeLogs << "Please, check file structure(1st line: proxy url - \"http://xxx.xxx.xxx.xxx:xxxx\"; 2nd line - \"usr:pwd\")" << endl;
@@ -132,13 +135,22 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 
 		curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L); // SKIP_PEER_VERIFICATION
 		curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L); // SKIP_HOSTNAME_VERIFICATION
+
+		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L); // 5 sec timeout
 		
 		urlString = urlBase + tokenString + "&page=" + pageNumber + "&size=200"; // размер выдачи больше 400 иногда не работает и сервер не хочет его обрабатывать
 
 		res = basicRequest(urlString, curl, &content);
 		if (res != CURLE_OK)
 		{
-			writeLogs << "Request \"" << urlString << "\" failed. Cannot get response without proxy. CURLcode error: \"" << curl_easy_strerror(res) << "\"" << endl;
+			writeLogs << "Request \"" << urlString << "\" failed. Cannot get response without proxy. \nCURLcode error: \"" << curl_easy_strerror(res) << "\"" << endl;
+
+			if (proxyString == "noproxy")
+			{
+				writeLogs << "Noproxy mode has been chosen - exiting the program..." << endl;
+				writeLogs.close();
+				return 1035;
+			}
 
 			curl_easy_setopt(curl, CURLOPT_HTTPPROXYTUNNEL, 1L);
 			curl_easy_setopt(curl, CURLOPT_PROXYAUTH, CURLAUTH_BASIC);
@@ -150,18 +162,18 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 			res = basicRequest(urlString, curl, &content);
 			if (res != CURLE_OK)
 			{
-				writeLogs << "Request \"" << urlString << "\" failed. Cannot get response using proxy. CURLcode error: \"" << curl_easy_strerror(res) << "\"" << endl;
+				writeLogs << "Request \"" << urlString << "\" failed. Cannot get response using proxy. \nCURLcode error: \"" << curl_easy_strerror(res) << "\"" << endl;
 				writeLogs.close();
 				return 104;
 			}
 		}
 
-		stack <string> documentsListsNames; // запушим в стек имена файлов, в которые мы помещали списки, чтобы когда получим все списки - уже извлекать их и открывать заново
-
+		stack <string> oidsList; // помещаем в этот стек все oid
+		stack <string> versionsList; // в этот же момент помещаем в стек все версии - до начала загрузки данных надо проверить размеры стеков, чтобы были равны
 		fstream documentsLists;
 		fileName = "all_data\\updated_data\\documents_lists\\" + pageNumber + "_page.txt";
 
-		documentsListsNames.push(fileName);
+		//documentsListsNames.push(fileName);
 		
 		documentsLists.open(fileName.c_str(), ios::out);
 		if (!documentsLists)
@@ -173,6 +185,10 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 		documentsLists << content;
 		documentsLists.close();
 
+		extractTags(content, "\"oid\":\"", '\"', &oidsList);
+		extractTags(content, "\"version\":\"", '\"', &versionsList);
+		
+		/*STARTED TRYING TO RECIEVE TOTAL NUMBER OF DICTIONARIES*/
 		int numPos = content.find("\"total\":");
 		int numLen = content.length();
 		if (!(numPos >= 0 && numPos < numLen))
@@ -182,67 +198,216 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 			return 106;
 		}
 
-		fstream F;
-		string substrInContent = content.substr(numPos + 8, 15); // переделать, чтобы получать кол-во страниц выделяя тэг в json полностью по кавычкам и/или запятым-разделителям
-		//cout << endl << substrInContent << endl;
-		numPos = substrInContent.find(",");
-		substrInContent = substrInContent.substr(0, numPos); // 8 - length of "total:"
-		//cout << endl << substrInContent << endl;
-		//system("pause");
-		int convertedStringToInt = atoi(substrInContent.c_str());
-		if (convertedStringToInt)
+		int separatorIndex = numPos + 8; // длина подстроки "total":
+		while ((separatorIndex < numLen) && (content[separatorIndex] != ','))
 		{
-			cout << endl << convertedStringToInt << "|" << "SUCCESS!" << endl;
+			separatorIndex++;
 		}
-		else
+
+		int convertedStringToInt = atoi(content.substr(numPos + 8, separatorIndex - (numPos + 8)).c_str());
+		if (!convertedStringToInt)
 		{
-			return 0; // не знаю, как обработать, кол-во страниц при ошибке
+			writeLogs << "Something went wrong during the conversion of total number of documents." << fileName << endl;
+			writeLogs.close();
+			return 107;
 		}
-		// TODO - почистить код сверху, чтобы он был более читаемый(привести в порядок и переделать)
+
+		counterOfAllDocs = convertedStringToInt; // подкостыливаем по-тихоньку
+
 		int maxPages = convertedStringToInt / 200;
 		if ((((double)convertedStringToInt) / 200.0) > ((double)maxPages))
 		{
 			maxPages++; // если к примеру в выдаче 1201 справочник, то мы получим 6 maxPages, но если разделить не нацело, то мы увидим, что надо прибавить 1 к кол-ву страниц
 		}
+		/*STOPPED TRYING TO RECIEVE TOTAL NUMBER OF DICTIONARIES*/
 
-		// оставшийся цикл для получения списков - дальше буду уже извлекать из этого списка файлов oid и загружать сами документы
-		for (int j = 2; j <= maxPages; j++)
+		char pageNumberToStr[100];
+		
+		for (unsigned int j = 2; j <= maxPages; j++)
 		{
-			pageNumber = pages[j];
-			//pageNumber = 1;
+			if (_itoa_s(j, pageNumberToStr, _countof(pageNumberToStr), 10))
+			{
+				writeLogs << "Something went wrong during the page number conversion. Page number: \"" << j << "\"" <<fileName << endl;
+				writeLogs.close();
+				return 200;
+			}
+			pageNumber = pageNumberToStr;
+
 			urlString = urlBase + tokenString + "&page=" + pageNumber + "&size=200";
-			curl_easy_setopt(curl, CURLOPT_URL, urlString.c_str());
-			//string content2;
 			content = "";
-			curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
-			curl_easy_setopt(curl, CURLOPT_WRITEDATA, &content);
-			res = curl_easy_perform(curl); // выполнение запроса
-			fileName = "all_data\\updated_data\\" + pageNumber + "_page.txt";
-			F.open(fileName.c_str(), ios::out);
-			F << content;
-			F.close();
+			res = basicRequest(urlString, curl, &content);
+
 			if (res != CURLE_OK)
 			{
-				fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+				writeLogs << "Something went wrong during the dictionary list request. Page number: \"" << j << "\"" << fileName << endl;
+				writeLogs.close();
+				return 201;
 			}
+
+			fileName = "all_data\\updated_data\\documents_lists\\" + pageNumber + "_page.txt";
+
+			documentsLists.open(fileName.c_str(), ios::out);
+			if (!documentsLists)
+			{
+				writeLogs << "Something went wrong while trying to save " << j << " list into file. Wanted destination: " << fileName << endl;
+				writeLogs.close();
+				return 203;
+			}
+			documentsLists << content;
+			documentsLists.close();
+
+			extractTags(content, "\"oid\":\"", '\"', &oidsList);
+			extractTags(content, "\"version\":\"", '\"', &versionsList);
 		}
-		// TODO - почистить код сверху, чтобы он был более читаемый(привести в порядок и переделать)
+		// ended receiving dictionaries lists
+		
+		if (oidsList.size() != versionsList.size())
+		{
+			writeLogs << "Sizes of oids list and versions list are not equal..." << endl;
+			writeLogs.close();
+			return 204;
+		}
+
+		string urlBasePass = "http://nsi.rosminzdrav.ru/port/rest/passport?userKey=" + tokenString + "&identifier=";
+		string urlBaseData = "http://nsi.rosminzdrav.ru/port/rest/data?userKey=" + tokenString + "&identifier=";
+		string urlPassString = "";
+		string urlDataString = "";
+		string topOID = "";
+		string topVer = "";
+
+		fstream docData;
+		string savingBuffer;
+		int dirFlag = 0;
+		pageNumber = "1";
+		string getVersion = "";
+
+		// начнем получать информацию о самих справочниках...
+		while (oidsList.size() > 0)
+		{
+			content = "";
+			topOID = oidsList.top();
+			oidsList.pop();
+			topVer = versionsList.top();
+			versionsList.pop();
+
+			savingBuffer = "mkdir all_data\\updated_data\\documents\\" + topOID;
+			dirFlag = system(savingBuffer.c_str()); // возвращает 0 при успешном создании -> если не 0, значит уже есть
+			if (dirFlag)
+			{
+				// сюда мы попали, так как директория уже существует
+				fileName = "all_data\\updated_data\\documents\\" + topOID + "\\current_version.txt";
+				docData.open(fileName.c_str(), ios::in);
+				if (!docData)
+				{
+					// если нет такого файла - значит нам надо удалить директории пасс и дата, а затем по-обычному загрузить все
+					savingBuffer = "rmdir /S /Q all_data\\updated_data\\documents\\" + topOID;
+					dirFlag = system(savingBuffer.c_str()); 
+					if (dirFlag)
+					{
+						writeLogs << "Something went wrong during the attempt to modify directory: " << savingBuffer << endl;
+						continue;
+					}	
+				}
+				else
+				{
+					getline(docData, getVersion); // считали версию
+					docData.close();
+					if (getVersion == topVer)
+					{
+						continue;
+					}
+					else
+					{
+						savingBuffer = "rmdir /S /Q all_data\\updated_data\\documents\\" + topOID;
+						dirFlag = system(savingBuffer.c_str());
+						if (dirFlag)
+						{
+							writeLogs << "Something went wrong during the attempt to modify directory: " << savingBuffer << endl;
+							continue;
+						}
+					}
+				}
+			}
+			
+			//sssssssssssssssssssssssssssss
+			urlPassString = urlBasePass + topOID; // pass url
+			res = basicRequest(urlPassString, curl, &content);
+
+			if (res != CURLE_OK)
+			{
+				writeLogs << "Something went wrong during the \"/passport\" request. Identifier: \"" << topOID << "\"" << endl;
+				continue;
+			}
+
+			savingBuffer = "mkdir all_data\\updated_data\\documents\\" + topOID + "\\passport";
+			system(savingBuffer.c_str());
+			savingBuffer = "mkdir all_data\\updated_data\\documents\\" + topOID + "\\data";
+			system(savingBuffer.c_str());
+
+			fileName = "all_data\\updated_data\\documents\\" + topOID + "\\current_version.txt";
+			docData.open(fileName.c_str(), ios::out);
+			if (!docData)
+			{
+				writeLogs << "Something went wrong during the attempt to save \"version\" into file. Wanted destination: " << fileName << endl;
+				continue;
+			}
+			docData << topVer;
+			docData.close();
+			// сохранили версию
+
+			fileName = "all_data\\updated_data\\documents\\" + topOID + "\\passport\\" + topOID + ".txt";
+			docData.open(fileName.c_str(), ios::out);
+			if (!docData)
+			{
+				writeLogs << "Something went wrong during the attempt to save \"/passport\" into file. Wanted destination: " << fileName << endl;
+				continue;
+			}
+			docData << content;
+			docData.close();
+			// сохранили структуру
+
+			// как сделать загрузку данных?
+
+			counter++;
+		}
+		// конец получения информации о справочниках
+
 		curl_easy_cleanup(curl);
 	}
 	else
 	{
-		cout << " An error occured, while initializing libcurl, try to launch the program again...";
-		Sleep(10000);			// ошибка при инициализации объекта curl, необходимо либо заново инициализировать,
-		cout << endl << endl;	// либо заново запустить программу - иначе искать ошибки в совместимости
-		system("pause");
+		writeLogs << "Cannot initialize CURL object - please restart the program - this may help." << endl;
+		writeLogs.close();
 		return 500;
 	}
 
 	curl_global_cleanup();
-	writeLogs << "Program has updated database. \nNumber of successful updates: " << "uuu/xxx" << endl;
-	writeLogs << "Number of failed updates: " << "yyy/xxx" << endl;
-	writeLogs << "|end of process: " << currentDate << "|" << endl << separator << endl;
+
+	// начало расчета времени
+	_time32(&aclock);
+	_localtime32_s(&newtime, &aclock);
+	errNum = asctime_s(buffer, 32, &newtime);
+	if (!errNum)
+	{
+		currentDate = buffer;
+		int enterPos = currentDate.find('\n');
+		int enterLen = currentDate.length();
+		if (enterPos >= 0 && enterPos < enterLen)
+		{
+			currentDate.erase(enterPos, enterLen);
+		}
+		else
+		{
+			currentDate = "cannot_recieve_date";
+		}
+	}
+	// конец расчета времени
+
+	writeLogs << "Program has updated database. \nNumber of successful updates: " << counter << " out of " << counterOfAllDocs << endl;
+	writeLogs << "|  end of the process: " << currentDate << "|" << endl << separator << endl << endl;
 	writeLogs.close();
+	
+	Sleep(20000);
 	return 0;
 }
 
@@ -258,7 +423,7 @@ CURLcode basicRequest(string urlF, CURL* curlHandle, string* contentString)
 	return resF;
 }
 
-string replaceBadCharacters(string strToFix, const char charToReplace, const char charToReplaceWith)
+string replaceBadCharacters(string strToFix, char charToReplace, char charToReplaceWith)
 {
 	for (unsigned int i = 0; i < strToFix.length(); i++)
 	{
@@ -273,4 +438,36 @@ string replaceBadCharacters(string strToFix, const char charToReplace, const cha
 	}
 
 	return strToFix;
+}
+
+void extractTags(string contentString, string tagToFind, char separatorBetweenTags, stack <string> *stackOfStrings)
+{
+	int numLen = contentString.length();
+	int numPos;
+	int tagToFindLength = tagToFind.length();
+	int separatorIndex;
+	char replaceTagWithChar = '-';
+
+	while (true)
+	{
+		numPos = contentString.find(tagToFind);
+		
+		if (!(numPos >= 0 && numPos < numLen))
+		{
+			return;
+		}
+
+		contentString[numPos] = replaceTagWithChar; // если заменить oid на -id, то искаться подстрока oid не будет - этого достаточно, а время работы будет меньше(немного)
+
+		separatorIndex = numPos + tagToFindLength; // длина подстроки tagToFind
+
+		while ((separatorIndex < numLen) && (contentString[separatorIndex] != separatorBetweenTags))
+		{
+			separatorIndex++;
+		}
+
+		stackOfStrings->push(contentString.substr(numPos + tagToFindLength, separatorIndex - (numPos + tagToFindLength)).c_str());
+	}
+
+	return;
 }
