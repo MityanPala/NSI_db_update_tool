@@ -2,7 +2,7 @@
 #include <fstream>
 #include <string>
 #include "curl.h"
-
+#include <Windows.h>
 #include <stack>
 
 using namespace std;
@@ -32,6 +32,8 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 	CURL* curl;
 	CURLcode res;
 
+	//1.2.643.5.1.13.13.99.2.444 - тут тип справочника(классификатор и т.д.) равен null в списке справочников, однако я не знаю, чему равен при получении passport
+
 	int counterOfAllDocs = 0;
 
 	int modifiedFiles = 0; // число всех измененных
@@ -50,6 +52,8 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 	string separator = "//--------------------------------------------------------------------------";
 	string logsName = "all_data\\configuration_and_logs\\logs\\overall_app_logs.txt";
 	string currentDate = "cannot_recieve_date";
+
+	string archiveDownload = "&showArchive=";
 
 	struct tm newtime;
 	__time32_t aclock;
@@ -91,13 +95,33 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 	writeLogs << separator << endl << "|start of the process: " << currentDate << "|" << endl;
 
 	string urlBase = "http://nsi.rosminzdrav.ru/port/rest/searchDictionary?userKey=";
-	
+
 	string pageNumber = "1";
 
 	string tokenString = "";
 	string proxyString = "";
 	string proxyUsrPwd = "";
 	string fileName = "";
+
+	/*extract archive download information*/
+	fstream archive;
+	archive.open("all_data\\configuration_and_logs\\dl_settings.txt", ios::in);
+	if (!archive)
+	{
+		writeLogs << "Cannot extract download settings from \"all_data\\configuration_and_logs\\dl_settings.txt\"" << endl;
+		writeLogs.close();
+		return 99;
+	}
+	string myArch = "";
+	getline(archive, myArch);
+	getline(archive, myArch);
+	archive.close();
+	archiveDownload += myArch;
+	if ((archiveDownload.find("false") == -1) && (archiveDownload.find("true") == -1))
+	{
+		archiveDownload = "";
+	}
+	/*extract archive download information*/
 
 	/***EXTRACT USAGE INFO FROM FILE***/
 	fstream extractToken, extractProxyInfo;
@@ -140,8 +164,8 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 		curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L); // SKIP_HOSTNAME_VERIFICATION
 
 		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L); // 5 sec timeout
-		
-		urlString = urlBase + tokenString + "&page=" + pageNumber + "&size=200"; // размер выдачи больше 400 иногда не работает и сервер не хочет его обрабатывать
+
+		urlString = urlBase + tokenString + "&page=" + pageNumber + "&size=200" + archiveDownload + "&sorting=fullName&sortingDirection=DESC"; // размер выдачи больше 400 иногда не работает и сервер не хочет его обрабатывать
 
 		res = basicRequest(urlString, curl, &content);
 		if (res != CURLE_OK)
@@ -176,21 +200,6 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 		stack <string> fullNamesList;
 		stack <string> versionsListCopy;
 		stack <string> oidsListCopy;
-		
-		fstream documentsLists;
-		fileName = "all_data\\updated_data\\documents_lists\\" + pageNumber + "_page.txt";
-
-		//documentsListsNames.push(fileName);
-		
-		documentsLists.open(fileName.c_str(), ios::out);
-		if (!documentsLists)
-		{
-			writeLogs << "Something went wrong while trying to save 1st list into file. Wanted destination: " << fileName << endl;
-			writeLogs.close();
-			return 105;
-		}
-		documentsLists << content;
-		documentsLists.close();
 
 		extractTags(content, "\"oid\":\"", '\"', &oidsList);
 		extractTags(content, "\"version\":\"", '\"', &versionsList);
@@ -230,20 +239,20 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 		/*STOPPED TRYING TO RECIEVE TOTAL NUMBER OF DICTIONARIES*/
 
 		char pageNumberToStr[100];
-		
+
 		for (unsigned int j = 2; j <= maxPages; j++)
 		{
 			if (_itoa_s(j, pageNumberToStr, _countof(pageNumberToStr), 10))
 			{
-				writeLogs << "Something went wrong during the page number conversion. Page number: \"" << j << "\"" <<fileName << endl;
+				writeLogs << "Something went wrong during the page number conversion. Page number: \"" << j << "\"" << fileName << endl;
 				writeLogs.close();
 				return 200;
 			}
 			pageNumber = pageNumberToStr;
 
-			urlString = urlBase + tokenString + "&page=" + pageNumber + "&size=200";
+			urlString = urlBase + tokenString + "&page=" + pageNumber + "&size=200" + archiveDownload + "&sorting=fullName&sortingDirection=DESC";
 			content = "";
-			
+
 			res = basicRequest(urlString, curl, &content);
 			if (res != CURLE_OK)
 			{
@@ -251,18 +260,6 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 				writeLogs.close();
 				return 201;
 			}
-
-			fileName = "all_data\\updated_data\\documents_lists\\" + pageNumber + "_page.txt";
-
-			documentsLists.open(fileName.c_str(), ios::out);
-			if (!documentsLists)
-			{
-				writeLogs << "Something went wrong while trying to save " << j << " list into file. Wanted destination: " << fileName << endl;
-				writeLogs.close();
-				return 203;
-			}
-			documentsLists << content;
-			documentsLists.close();
 
 			extractTags(content, "\"oid\":\"", '\"', &oidsList);
 			extractTags(content, "\"version\":\"", '\"', &versionsList);
@@ -277,7 +274,7 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 			return 204;
 		}
 
-		// lets make a file with all lists of oids
+		// lets start to make a file with all lists of oids
 		oidsListCopy = oidsList;
 		versionsListCopy = versionsList;
 
@@ -290,10 +287,10 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 
 		string pathToList = "all_data\\updated_data\\documents_lists\\list_of_all_dictionaries.txt";
 
-		fstream listofalldictionaries, justchecking;
+		fstream listofalldictionaries;
 		listofalldictionaries.open(pathToList.c_str(), ios::out);
 		pathToList = "all_data\\updated_data\\documents_lists\\justchecking.txt";
-		justchecking.open(pathToList.c_str(), ios::out);
+
 		if (!listofalldictionaries)
 		{
 			writeLogs << "Something went wrong while trying to save list of all dictionaries into file. Wanted destination: " << pathToList << endl;
@@ -301,14 +298,12 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 			return 20003;
 		}
 		listofalldictionaries << "{\"total\":" << counterOfAllDocs << ",\"list\":[";
-		
+
 		while (oidsListCopy.size() > 0)
 		{
 			listofalldictionaries << "{\"oid\":\"" << oidsListCopy.top() << "\",";
 			listofalldictionaries << "\"version\":\"" << versionsListCopy.top() << "\",";
 			listofalldictionaries << "\"fullName\":\"" << fullNamesList.top() << "\"}";
-
-			justchecking << fullNamesList.top() << endl;
 
 			oidsListCopy.pop();
 			versionsListCopy.pop();
@@ -320,16 +315,8 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 			}
 		}
 		listofalldictionaries << "]}";
-		justchecking.close();
 		listofalldictionaries.close();
-		// lets make a file with all lists of oids
-
-		/*if (oidsList.size() != versionsList.size())
-		{
-			writeLogs << "Sizes of oids list and versions list are not equal..." << endl;
-			writeLogs.close();
-			return 204;
-		}*/
+		// lets finish making a file with all lists of oids
 
 		system("cls");
 
@@ -346,10 +333,16 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 		string getVersion = "";
 		int counterOfUpToDate = 0;
 
+		string getVersionFromDataFile; // kostily
+		stack <string> bufferStack;
+
 		// начнем получать информацию о самих справочниках...
 		while (oidsList.size() > 0)
 		{
 			system("cls");
+			cout << "Number of all files -------------------- " << counterOfAllDocs << endl;
+			cout << "Up to date files ----------------------- " << counterOfUpToDate << endl;
+			cout << "Successfully modified / all modified --- " << suc_modifiedFiles << "/" << modifiedFiles << endl << endl;
 
 			content = "";
 			topOID = oidsList.top();
@@ -357,50 +350,30 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 			topVer = versionsList.top();
 			versionsList.pop();
 
-			savingBuffer = "mkdir all_data\\updated_data\\documents\\" + topOID;
-			dirFlag = system(savingBuffer.c_str()); // возвращает 0 при успешном создании -> если не 0, значит уже есть
-			if (dirFlag)
+			// check if version is the same as we have in stack, if file exists
+			savingBuffer = "all_data\\updated_data\\documents\\" + topOID + ".json"; // загружаем данные в файл с расширением json, txt - это паспорт
+			docData.open(savingBuffer.c_str(), ios::in);
+			if (docData)
 			{
-				// сюда мы попали, так как директория уже существует
-				fileName = "all_data\\updated_data\\documents\\" + topOID + "\\current_version.txt";
-				docData.open(fileName.c_str(), ios::in);
-				if (!docData)
+				docData >> getVersionFromDataFile;
+				docData.close();
+				extractTags(getVersionFromDataFile, "\"version\":\"", '\"', &bufferStack);
+				if (bufferStack.size() != 0)
 				{
-					// если нет такого файла - значит нам надо удалить директории пасс и дата, а затем по-обычному загрузить все
-					savingBuffer = "rmdir /S /Q all_data\\updated_data\\documents\\" + topOID;
-					dirFlag = system(savingBuffer.c_str()); 
-					if (dirFlag)
-					{
-						writeLogs << "Something went wrong during the attempt to modify directory: " << savingBuffer << endl;
-						continue;
-					}	
-				}
-				else
-				{
-					getline(docData, getVersion); // считали версию
-					docData.close();
-					if (getVersion == topVer)
+					if (topVer == bufferStack.top()) // if the stack is not empty - we found version without mistakes
 					{
 						counterOfUpToDate++;
-						std::cout << counterOfUpToDate << " out of " << counterOfAllDocs << " is up to date" << endl;
+						cout << counterOfUpToDate << " out of " << counterOfAllDocs << " is up to date" << endl;
 						continue;
-					}
-					else
-					{
-						savingBuffer = "rmdir /S /Q all_data\\updated_data\\documents\\" + topOID;
-						dirFlag = system(savingBuffer.c_str());
-						if (dirFlag)
-						{
-							writeLogs << "Something went wrong during the attempt to modify directory: " << savingBuffer << endl;
-							continue;
-						}
 					}
 				}
 			}
+			// check if version is the same as we have in stack, if file exists ^
 
-			modifiedFiles++; // если у нас не совпадают версии или ее нет - значит, мы затрагиваем директорию и следовательно будем проводить изменения ниже
+			modifiedFiles++; // если у нас не совпадают версии или ее нет - значит, мы затрагиваем директорию и следовательно будем проводить изменения ниже			
 
-			urlPassString = urlBasePass + topOID; // pass url
+			// сохранили структуру
+			urlPassString = urlBasePass + topOID + "&version=" + topVer; // pass url
 			res = basicRequest(urlPassString, curl, &content);
 
 			if (res != CURLE_OK)
@@ -409,15 +382,8 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 				continue;
 			}
 
-			savingBuffer = "mkdir all_data\\updated_data\\documents\\" + topOID + "\\passport";
-			system(savingBuffer.c_str());
-			savingBuffer = "mkdir all_data\\updated_data\\documents\\" + topOID + "\\data";
-			system(savingBuffer.c_str());
-
-			// здесь раньше было сохранение версии, переместил ниже, после получения паспорта и значений справочника
-
-			fileName = "all_data\\updated_data\\documents\\" + topOID + "\\passport\\" + topOID + ".txt";
-			docData.open(fileName.c_str(), ios::out);
+			fileName = "all_data\\updated_data\\documents\\" + topOID + "_temp.txt";
+			docData.open(fileName.c_str(), ios::out | ios::trunc);
 			if (!docData)
 			{
 				writeLogs << "Something went wrong during the attempt to save \"/passport\" into file. Wanted destination: " << fileName << endl;
@@ -425,18 +391,24 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 			}
 			docData << content;
 			docData.close();
-			// сохранили структуру
+
+			//Sleep(2500);
+			fileName = "del all_data\\updated_data\\documents\\" + topOID + ".txt";
+			system(fileName.c_str());
+			//Sleep(2500);
+			fileName = "ren all_data\\updated_data\\documents\\" + topOID + "_temp.txt " + topOID + ".txt";
+			system(fileName.c_str());
+			// сохранили структуру ^
 
 			//-----------------------------------------------------------------------------------------------
 			// загрузка данных справочника
 			/*STARTED TRYING TO RECIEVE TOTAL NUMBER OF DICTIONARIES*/
-			//stack <string> dataRowCount;
 			int numPosN = content.find("\"rowsCount\":"); // "total": "rowsCount":
 			int numLenN = content.length();
 
 			if (!(numPosN >= 0 && numPosN < numLenN))
 			{
-				writeLogs << "Something went wrong while trying to get total number of rows: " << topOID << endl;
+				writeLogs << "Something went wrong while trying to get total number of rows: " << topOID << "|" << topVer << endl;
 				continue;
 			}
 
@@ -463,18 +435,19 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 			char pageNumberToStrN[100];
 			// открываем на запись общий файл, раньше открывался 1 файл на каждый запрос
 			//fileName = "all_data\\updated_data\\documents\\" + topOID + "\\data\\" + topOID + "_page_" + pageNumber + ".txt";
-			fileName = "all_data\\updated_data\\documents\\" + topOID + "\\data\\" + topOID + "_wholefile.txt";
+			fileName = "all_data\\updated_data\\documents\\" + topOID + "_temp.json";
 
-			docData.open(fileName.c_str(), ios::out);
+			docData.open(fileName.c_str(), ios::out | ios::trunc);
 			if (!docData)
 			{
 				writeLogs << "Something went wrong while trying to open the whole file to save data into it - OID:" << topOID << endl;
 				continue;
 			}
-			
+			int successfullyDownloadedPages = 0;
 			// открываем на запись общий файл, раньше открывался 1 файл на каждый запрос
 			for (unsigned int j = 1; j <= maxPagesN; j++)
 			{
+				successfullyDownloadedPages++;
 				static int timestart = 0;
 				static int timeleft = 0;
 
@@ -482,68 +455,118 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 				{
 					timestart = clock();
 				}
-				if (j == 25)
+				/*if (j == 25)
 				{
 					timeleft = clock();
 					timeleft = ((timeleft - timestart) / CLOCKS_PER_SEC);
-				}
+				}*/
 				if (j % 25 == 0)
 				{
+					timeleft = clock();
+					timeleft = ((timeleft - timestart) / CLOCKS_PER_SEC);
+
 					system("cls");
-					cout << topOID << ": " << j << " pages already loaded out of " << maxPagesN << ";"<< endl;
+					cout << "Number of all files -------------------- " << counterOfAllDocs << endl;
+					cout << "Up to date files ----------------------- " << counterOfUpToDate << endl;
+					cout << "Successfully modified / all modified --- " << suc_modifiedFiles << "/" << modifiedFiles << endl << endl;
+
+					cout << topOID << ": " << j << " pages already loaded out of " << maxPagesN << ";" << endl;
 					timestart = (int)((timeleft * (maxPagesN - j)) / 25);
 					cout << "Estimated time left to finish downloading this dictionary: " << timestart / 60 << " minutes " << timestart % 60 << " seconds." << endl;
+					timestart = clock();
 				}
 
 				if (_itoa_s(j, pageNumberToStrN, _countof(pageNumberToStrN), 10))
 				{
 					writeLogs << "Something went wrong during the page number conversion. Page number: \"" << j << "\" " << topOID << endl;
+					successfullyDownloadedPages--;
 					continue;
 				}
 				pageNumber = pageNumberToStrN;
 
-				urlDataString = urlBaseData + topOID + "&page=" + pageNumber + "&size=200";
+				urlDataString = urlBaseData + topOID + "&version=" + topVer + "&page=" + pageNumber + "&size=200";
 				content = "";
 
 				int tries = 0;
-				while(tries < 5)
+				while (tries < 5)
 				{
 					res = basicRequest(urlDataString, curl, &content);
-					
+
 					if (res == CURLE_OK)
 					{
 						tries = -1;
 						break;
 					}
-					
+
 				}
 				if (tries != -1)
 				{
 					writeLogs << "Something went wrong during the dictionary data request. Page number: \"" << j << "\" " << topOID << endl;
+					successfullyDownloadedPages--;
 					continue;
 				}
 				// раньше открытие файла для каждого запроса было тут
 				tries = 0;
-				docData << content << endl << endl;
+				if (j == 1)
+				{
+					string bufferToDeleteVer = topVer;
+					int iterator = 0;
+					while (iterator < bufferToDeleteVer.length())
+					{
+						bufferToDeleteVer[iterator++] = '*';
+					}
+					docData << "{\"version\":\"" << bufferToDeleteVer << "\"";
+					/**/
+					//docData << "{\"version\":\"" << topVer << "\"";
+					static int somethingInteresting = 0;
+					somethingInteresting = content.find_first_of('{');
+					if (somethingInteresting != -1) // string::npos
+					{
+						content[somethingInteresting] = ',';
+					}
+					if (j != maxPagesN)
+					{
+						content.replace(content.find_last_of(']'), 2, "");
+					}
+					docData << content;
+					continue;
+				}
+
+				//cout << "hello" << endl;
+
+				content.replace(0, content.find_first_of('[') + 1, ",");
+				if (j != maxPagesN)
+				{
+					content.replace(content.find_last_of(']'), 2, "");
+					docData << content;
+					continue;
+				}
+				docData << content;
+				// подсчитать количество ошибок при загрузке страниц - если есть хоть одна - удалить файл полностью, так как с таким хардкодингом файл json будет испорчен и не прочитается нормально
+
+				// блок обработки крайнего значения диапазона
+			}
+
+			if (successfullyDownloadedPages == maxPagesN)
+			{
+				docData.seekg(ios::beg); // если удалось записать файл полностью правильно - убираем затирание звездочками в начале записи файла
+				docData << "{\"version\":\"" << topVer << "\"";
 			}
 
 			docData.close();
+
+			//Sleep(2500);
+			fileName = "del all_data\\updated_data\\documents\\" + topOID + ".json";
+			system(fileName.c_str());
+			//Sleep(2500);
+			fileName = "ren all_data\\updated_data\\documents\\" + topOID + "_temp.json " + topOID + ".json";
+			system(fileName.c_str());
+
+
 			// загрузка данных справочника
 			//-----------------------------------------------------------------------------------------------
-			// начало сохранения версии
-			fileName = "all_data\\updated_data\\documents\\" + topOID + "\\current_version.txt";
-			docData.open(fileName.c_str(), ios::out);
-			if (!docData)
-			{
-				writeLogs << "Something went wrong during the attempt to save \"version\" into file. Wanted destination: " << fileName << endl;
-				continue;
-			}
-			docData << topVer;
-			docData.close();
-			// сохранили версию
 
 			suc_modifiedFiles++; // если успешно заново загрузили все данные - доходим до этой строки и увеличиваем счетчик
-			cout << suc_modifiedFiles << " files has been modified by that moment" << endl;
 		}
 		// конец получения информации о справочниках
 
@@ -582,7 +605,7 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 	writeLogs << "Successfully modified dictionaries: " << suc_modifiedFiles << " out of all modified dictionaries: " << modifiedFiles << endl;
 	writeLogs << "|  end of the process: " << currentDate << "|" << endl << separator << endl << endl;
 	writeLogs.close();
-	
+
 	Sleep(10000);
 	return 0;
 }
@@ -616,7 +639,7 @@ string replaceBadCharacters(string strToFix, char charToReplace, char charToRepl
 	return strToFix;
 }
 
-void extractTags(string contentString, string tagToFind, char separatorBetweenTags, stack <string> *stackOfStrings)
+void extractTags(string contentString, string tagToFind, char separatorBetweenTags, stack <string>* stackOfStrings)
 {
 	int numLen = contentString.length();
 	int numPos;
@@ -627,7 +650,7 @@ void extractTags(string contentString, string tagToFind, char separatorBetweenTa
 	while (true)
 	{
 		numPos = contentString.find(tagToFind);
-		
+
 		if (!(numPos >= 0 && numPos < numLen))
 		{
 			return;
@@ -637,10 +660,21 @@ void extractTags(string contentString, string tagToFind, char separatorBetweenTa
 
 		separatorIndex = numPos + tagToFindLength; // длина подстроки tagToFind
 
-		while ((separatorIndex < numLen) && (contentString[separatorIndex] != separatorBetweenTags))
-		{
-			separatorIndex++;
-		}
+		do {
+			while ((separatorIndex < numLen) && (contentString[separatorIndex] != separatorBetweenTags))
+			{
+				separatorIndex++;
+			}
+			if ((contentString[separatorIndex] == separatorBetweenTags) && (contentString[separatorIndex - 1] == '\\'))
+			{
+				separatorIndex++;
+			}
+			else
+			{
+				break;
+			}
+		} while (true);
+		
 
 		stackOfStrings->push(contentString.substr(numPos + tagToFindLength, separatorIndex - (numPos + tagToFindLength)).c_str());
 	}
