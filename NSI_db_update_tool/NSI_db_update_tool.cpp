@@ -27,6 +27,8 @@ CURLcode basicRequest(string urlF, CURL* curlHandle, string* contentString);
 string replaceBadCharacters(string strToFix, char charToReplace, char charToReplaceWith);
 void extractTags(string contentString, string tagToFind, char separatorBetweenTags, stack <string>* stackOfStrings);
 
+void deleteLawsTag(string* contentString, string tagToFind, char separatorBetweenTags); // kostyl
+
 int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - если дошли до самого конца - там получим 0
 {
 	CURL* curl;
@@ -201,6 +203,8 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 		stack <string> versionsListCopy;
 		stack <string> oidsListCopy;
 
+		deleteLawsTag(&content, "\"laws\":[", ']');
+
 		extractTags(content, "\"oid\":\"", '\"', &oidsList);
 		extractTags(content, "\"version\":\"", '\"', &versionsList);
 		extractTags(content, "\"fullName\":\"", '\"', &fullNamesList);
@@ -231,7 +235,7 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 
 		counterOfAllDocs = convertedStringToInt; // подкостыливаем по-тихоньку
 
-		int maxPages = convertedStringToInt / 200;
+		unsigned int maxPages = convertedStringToInt / 200;
 		if ((((double)convertedStringToInt) / 200.0) > ((double)maxPages))
 		{
 			maxPages++; // если к примеру в выдаче 1201 справочник, то мы получим 6 maxPages, но если разделить не нацело, то мы увидим, что надо прибавить 1 к кол-ву страниц
@@ -260,6 +264,8 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 				writeLogs.close();
 				return 201;
 			}
+
+			deleteLawsTag(&content, "\"laws\":[", ']');
 
 			extractTags(content, "\"oid\":\"", '\"', &oidsList);
 			extractTags(content, "\"version\":\"", '\"', &versionsList);
@@ -425,7 +431,7 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 				continue;
 			}
 
-			int maxPagesN = convertedStringToIntN / 200;
+			unsigned int maxPagesN = convertedStringToIntN / 200;
 			if ((((double)convertedStringToIntN) / 200.0) > ((double)maxPagesN))
 			{
 				maxPagesN++; // если к примеру в выдаче 1201 справочник, то мы получим 6 maxPages, но если разделить не нацело, то мы увидим, что надо прибавить 1 к кол-ву страниц
@@ -510,7 +516,7 @@ int main() // по порядку возвращаем значения сверху вниз с увеличением на 1 - ес
 				if (j == 1)
 				{
 					string bufferToDeleteVer = topVer;
-					int iterator = 0;
+					unsigned int iterator = 0;
 					while (iterator < bufferToDeleteVer.length())
 					{
 						bufferToDeleteVer[iterator++] = '*';
@@ -677,6 +683,53 @@ void extractTags(string contentString, string tagToFind, char separatorBetweenTa
 		
 
 		stackOfStrings->push(contentString.substr(numPos + tagToFindLength, separatorIndex - (numPos + tagToFindLength)).c_str());
+	}
+
+	return;
+}
+
+void deleteLawsTag(string* contentString, string tagToFind, char separatorBetweenTags)
+{
+	int numLen = contentString->length();
+	int numPos;
+	int tagToFindLength = tagToFind.length();
+	int separatorIndex;
+	char eraserBase = '*';
+
+	while (true)
+	{
+		numPos = contentString->find(tagToFind);
+
+		if (!(numPos >= 0 && numPos < numLen))
+		{
+			return;
+		}
+		
+
+		//contentString[numPos] = replaceTagWithChar; // если заменить oid на -id, то искаться подстрока oid не будет - этого достаточно, а время работы будет меньше(немного)
+
+		separatorIndex = numPos + tagToFindLength; // длина подстроки tagToFind
+
+		do {
+			while ((separatorIndex < numLen) && ((*contentString)[separatorIndex] != separatorBetweenTags))
+			{
+				separatorIndex++;
+			}
+			if (((*contentString)[separatorIndex] == separatorBetweenTags) && ((*contentString)[separatorIndex] == '\\'))
+			{
+				separatorIndex++;
+			}
+			else
+			{
+				for (int deleting = numPos; deleting <= separatorIndex; deleting++)
+				{
+					(*contentString)[deleting] = eraserBase;
+				}
+				break;
+			}
+		} while (true);
+
+		
 	}
 
 	return;
